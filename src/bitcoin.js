@@ -4,28 +4,30 @@
    */
   Bitcoin.setNetwork = function(network) {
     if (network == 'prod') {
+      Bitcoin.network = 'prod';
       Bitcoin.Address.pubKeyHashVersion = 0x00;
       Bitcoin.Address.p2shVersion    = 0x5;
       Bitcoin.ECKey.privateKeyPrefix = 0x80;
     } else {
       // test network
+      Bitcoin.network = 'testnet';
       Bitcoin.Address.pubKeyHashVersion = 0x6f;
       Bitcoin.Address.p2shVersion    = 0xc4;
       Bitcoin.ECKey.privateKeyPrefix = 0xef;
     }
   }
   Bitcoin.setNetwork('prod');
-  
+
   // WARNING:  It's bad form to set a function on the global array prototype here.
   Array.prototype.compare = function (array) {
     // if the other array is a falsy value, return
     if (!array)
       return false;
-  
+
     // compare lengths - can save a lot of time
     if (this.length != array.length)
       return false;
-  
+
     for (var i = 0; i < this.length; i++) {
       // Check if we have nested arrays
       if (this[i] instanceof Array && array[i] instanceof Array) {
@@ -40,7 +42,7 @@
       }
     return true;
   }
-  
+
   // So we can load into node.
   if (typeof(module) == 'object') {
     module.exports = function(network) {
