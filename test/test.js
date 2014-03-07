@@ -533,7 +533,7 @@ test("bytesToBase64 - ok", function() {
     [1,2,3,4,5,6,7],
     randomArray
   ];
-  
+
   for (var index = 0; index < testArrays.length; ++index) {
     var a = testArrays[index];
     var s = Bitcoin.Util.bytesToBase64(a);
@@ -562,6 +562,28 @@ test("stringToBase58", function() {
   throws(function() { Bitcoin.Base58.encodeFromString(''); }, 'empty string throws');
   throws(function() { Bitcoin.Base58.encodeFromString(1234); }, 'integer input throws');
   throws(function() { Bitcoin.Base58.encodeFromString([1,2,3,4]); }, 'array input throws');
+});
+
+test("numToVarInt", function() {
+  var data = [
+    [0, '00' ],
+    [1, '01'],
+    [253, 'fdfd00'],
+    [254, 'fdfe00'],
+    [255, 'fdff00'],
+    [0x100, 'fd0001'],
+    [0x1000, 'fd0010'],
+    [0x1001, 'fd0110'],
+    [0x10000, 'fe00000100'],
+    [0x12345, 'fe45230100'],
+    [0x12345678, 'fe78563412'],
+  ];
+  data.forEach(function(datum) {
+    var integer = datum[0];
+    var result = datum[1];
+    var actual = Bitcoin.Util.bytesToHex(Bitcoin.Util.numToVarInt(integer));
+    ok(actual == result, 'should work for ' + integer);
+  });
 });
 
 //

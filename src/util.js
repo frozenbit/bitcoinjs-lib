@@ -146,10 +146,10 @@ Bitcoin.Util = {
     if (i < 0xfd) {
       // unsigned char
       return [i];
-    } else if (i <= 1<<16) {
+    } else if (i < 0x10000) {
       // unsigned short (LE)
       return [0xfd, i & 255, i >>> 8];    // little endian!
-    } else if (i <= 1<<32) {
+    } else if (i < 0x100000000) {
       // unsigned int (LE)
       return [0xfe].concat(Crypto.util.wordsToBytes([i]).reverse());  // little endian!
     } else {
