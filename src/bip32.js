@@ -1,51 +1,75 @@
-
-var MAINNET_PUBLIC = 0x0488b21e;
-var MAINNET_PRIVATE = 0x0488ade4;
-var TESTNET_PUBLIC = 0x043587cf;
-var TESTNET_PRIVATE = 0x04358394;
+var MAINNET_PUBLIC = 0x0488b21e;   // 'xpub'
+var MAINNET_PRIVATE = 0x0488ade4;  // 'xprv'
+var TESTNET_PUBLIC = 0x043587cf;   // 'tpub'
+var TESTNET_PRIVATE = 0x04358394;  // 'tprv'
 
 var BIP32 = function(bytes) {
     // decode base58
     if( typeof bytes === "string" ) {
         var decoded = Bitcoin.Base58.decode(bytes);
-        if( decoded.length != 82 ) throw new Exception("Not enough data");
+        if (decoded.length != 82 ) {
+            throw new Error("Not enough data");
+        }
         var checksum = decoded.slice(78, 82);
         bytes = decoded.slice(0, 78);
 
         var hash = Crypto.SHA256( Crypto.SHA256( bytes, { asBytes: true } ), { asBytes: true } );
 
-        if( hash[0] != checksum[0] || hash[1] != checksum[1] || hash[2] != checksum[2] || hash[3] != checksum[3] ) {
-            throw new Exception("Invalid checksum");
+        if (hash[0] != checksum[0] || hash[1] != checksum[1] || hash[2] != checksum[2] || hash[3] != checksum[3] ) {
+            throw new Error("Invalid checksum");
         }
     }
 
-    if( bytes !== undefined ) 
+    if (bytes !== undefined) {
         this.init_from_bytes(bytes);
+    }
 }
 
 BIP32.prototype.init_from_bytes = function(bytes) {
+    function uint(f, size) {
+        if (f.length < size) {
+            throw new Error("not enough data");
+        }
+        var n = 0;
+        for (var i = 0; i < size; i++) {
+            n *= 256;
+            n += f[i];
+        }
+        return n;
+    }
+    function u8(f)  { return uint(f,1); }
+    function u32(f) { return uint(f,4); }
+
+    function decompress_pubkey(key_bytes) {
+        var ecparams = getSECCurveByName("secp256k1");
+        return ecparams.getCurve().decodePointHex(Crypto.util.bytesToHex(key_bytes));
+    }
+
     // Both pub and private extended keys are 78 bytes
-    if( bytes.length != 78 ) throw new Exception("not enough data");
+    if ( bytes.length != 78 ) {
+        throw new Error("not enough data");
+    }
 
     this.version            = u32(bytes.slice(0, 4));
     this.depth              = u8 (bytes.slice(4, 5));
     this.parent_fingerprint = bytes.slice(5, 9);
     this.child_index        = u32(bytes.slice(9, 13));
     this.chain_code         = bytes.slice(13, 45);
-    
+
     var key_bytes = bytes.slice(45, 78);
 
-    if( (this.version == MAINNET_PRIVATE || this.version == TESTNET_PRIVATE) && key_bytes[0] == 0 ) {
+    if ( (this.version == MAINNET_PRIVATE || this.version == TESTNET_PRIVATE) && key_bytes[0] == 0 ) {
         this.eckey = new Bitcoin.ECKey(key_bytes.slice(1, 33));
         this.eckey.setCompressed(true);
         this.has_private_key = true;
-    } else if( (this.version == MAINNET_PUBLIC || this.version == TESTNET_PUBLIC) && (key_bytes[0] == 0x02 || key_bytes[0] == 0x03) ) {
+    } else if ( (this.version == MAINNET_PUBLIC || this.version == TESTNET_PUBLIC) &&
+                (key_bytes[0] == 0x02 || key_bytes[0] == 0x03) ) {
         this.eckey = new Bitcoin.ECKey("0");
         this.eckey.pubPoint = decompress_pubkey(key_bytes);
         this.eckey.setCompressed(true);
         this.has_private_key = false;
     } else {
-        throw new Exception("Invalid key");
+        throw new Error("Invalid key");
     }
 
     this.build_extended_public_key();
@@ -156,7 +180,7 @@ BIP32.prototype.derive = function(path) {
         var c = e[i];
 
         if( i == 0 ) {
-            if( c != 'm' ) throw "invalid path";
+            if( c != 'm' ) throw new Error("invalid path");
             continue;
         }
 
@@ -182,7 +206,9 @@ BIP32.prototype.derive_child = function(i) {
     var use_private = (i & 0x80000000) != 0;
     var ecparams = getSECCurveByName("secp256k1");
 
-    if( use_private && (!this.has_private_key || (this.version != MAINNET_PRIVATE && this.version != TESTNET_PRIVATE)) ) throw new Error("Cannot do private key derivation without private key");
+    if (use_private && (!this.has_private_key || (this.version != MAINNET_PRIVATE && this.version != TESTNET_PRIVATE)) ) {
+        throw new Error("Cannot do private key derivation without private key");
+    }
 
     var ret = null;
     if( this.has_private_key ) {
@@ -195,7 +221,7 @@ BIP32.prototype.derive_child = function(i) {
             data = this.eckey.getPub().concat(ib);
         }
 
-        var j = new jsSHA(Crypto.util.bytesToHex(data), 'HEX');   
+        var j = new jsSHA(Crypto.util.bytesToHex(data), 'HEX');
         var hash = j.getHMAC(Crypto.util.bytesToHex(this.chain_code), "HEX", "SHA-512", "HEX");
         var il = new BigInteger(hash.slice(0, 64), 16);
         var ir = Crypto.util.hexToBytes(hash.slice(64, 128));
@@ -205,15 +231,14 @@ BIP32.prototype.derive_child = function(i) {
         var k = il.add(this.eckey.priv).mod(ecparams.getN());
 
         ret = new BIP32();
-        ret.chain_code  = ir;
-
+        ret.chain_code = ir;
         ret.eckey = new Bitcoin.ECKey(k.toByteArrayUnsigned());
         ret.has_private_key = true;
 
     } else {
         // Public-key derivation is the same whether we have private key or not.
         var data = this.eckey.getPub().concat(ib);
-        var j = new jsSHA(Crypto.util.bytesToHex(data), 'HEX');   
+        var j = new jsSHA(Crypto.util.bytesToHex(data), 'HEX');
         var hash = j.getHMAC(Crypto.util.bytesToHex(this.chain_code), "HEX", "SHA-512", "HEX");
         var il = new BigInteger(hash.slice(0, 64), 16);
         var ir = Crypto.util.hexToBytes(hash.slice(64, 128));
@@ -222,8 +247,7 @@ BIP32.prototype.derive_child = function(i) {
         var k = ecparams.getG().multiply(il).add(this.eckey.getPubPoint());
 
         ret = new BIP32();
-        ret.chain_code  = ir;
-
+        ret.chain_code = ir;
         ret.eckey = new Bitcoin.ECKey("0");
         ret.eckey.setPub(k.getEncoded(true));
         ret.has_private_key = false;
@@ -242,24 +266,4 @@ BIP32.prototype.derive_child = function(i) {
     return ret;
 }
 
-
-function uint(f, size) {
-    if (f.length < size)
-        throw new Error("not enough data");
-    var n = 0;
-    for (var i = 0; i < size; i++) {
-        n *= 256;
-        n += f[i];
-    }
-    return n;
-}
-
-function u8(f)  { return uint(f,1); }
-function u16(f) { return uint(f,2); }
-function u32(f) { return uint(f,4); }
-function u64(f) { return uint(f,8); }
-
-function decompress_pubkey(key_bytes) {
-    var ecparams = getSECCurveByName("secp256k1");
-    return ecparams.getCurve().decodePointHex(Crypto.util.bytesToHex(key_bytes));
-}
+Bitcoin.BIP32 = BIP32;
