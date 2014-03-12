@@ -85,6 +85,40 @@ test("Verify ECKey", function () {
   return ;
 });
 
+test("Child Derivation Tests", function() {
+  // Verify that we can derive both from the root and also from the child equivalently.
+
+  var seed = '128912892389238923782389237812';
+  var accountPath = 'm/50';
+
+  var newRoot = new Bitcoin.BIP32().initFromSeed(seed);
+  var newAcct = newRoot.derive(accountPath);
+  newAcct = new Bitcoin.BIP32(newAcct.extended_private_key_string());
+
+  for (var index = 0; index < 5; index++) {
+    var rootDerivedAccount = newRoot.derive(accountPath + '/' + index);
+    var childAcct = newAcct.derive_child(index);
+    equal(rootDerivedAccount.extended_private_key_string(), childAcct.extended_private_key_string(), "child " + index + " derivation ok");
+    equal(rootDerivedAccount.extended_public_key_string(), childAcct.extended_public_key_string(), "child " + index + " derivation ok");
+  }
+});
+
+test("Child Pubkey Derivation Tests", function() {
+  // Verify that we can derive both from the root and also from the child equivalently.
+
+  var seed = '128912892389238923782389237812';
+  var accountPath = 'm/50\'';
+
+  var newRoot = new Bitcoin.BIP32().initFromSeed(seed);
+  var newAcct = newRoot.derive(accountPath);
+  newAcct = new Bitcoin.BIP32(newAcct.extended_public_key_string());
+
+  for (var index = 0; index < 5; index++) {
+    var rootDerivedAccount = newRoot.derive(accountPath + '/' + index);
+    var childAcct = newAcct.derive_child(index);
+    equal(rootDerivedAccount.extended_public_key_string(), childAcct.extended_public_key_string(), "child " + index + " derivation ok");
+  }
+});
 
 
 test("Large vectors test", function() {
