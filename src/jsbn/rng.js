@@ -23,3 +23,5 @@ SecureRandom.prototype.nextBytes = function(arrayToFillRandomly) {
     arrayToFillRandomly[index] = randomArray[index] % 256;
   }
 }
+
+Bitcoin.SecureRandom = SecureRandom;

@@ -3,8 +3,10 @@ var MAINNET_PRIVATE = 0x0488ade4;  // 'xprv'
 var TESTNET_PUBLIC = 0x043587cf;   // 'tpub'
 var TESTNET_PRIVATE = 0x04358394;  // 'tprv'
 
+
+// Create a BIP32 address.
+// |bytes| is a string and must be a Base58-encoding of a BIP32 extended public or extended private key.
 var BIP32 = function(bytes) {
-    // decode base58
     if( typeof bytes === "string" ) {
         var decoded = Bitcoin.Base58.decode(bytes);
         if (decoded.length != 82 ) {
@@ -18,11 +20,30 @@ var BIP32 = function(bytes) {
         if (hash[0] != checksum[0] || hash[1] != checksum[1] || hash[2] != checksum[2] || hash[3] != checksum[3] ) {
             throw new Error("Invalid checksum");
         }
-    }
-
-    if (bytes !== undefined) {
         this.init_from_bytes(bytes);
     }
+}
+
+// Initialize from a bitcoin seed
+BIP32.prototype.initFromSeed = function(seedBytes) {
+    var sha = new jsSHA(seedBytes, "HEX");
+    var hash = sha.getHMAC('Bitcoin seed', "TEXT", "SHA-512", "HEX");
+    hash = Crypto.util.hexToBytes(hash);
+    var masterKey = hash.slice(0, 32);
+    var chainCode = hash.slice(32, 64);
+    this.version = MAINNET_PRIVATE;
+    this.depth = 0;
+    this.parent_fingerprint = [0,0,0,0];
+    this.child_index = 0;
+    this.chain_code = chainCode;
+    this.eckey = new Bitcoin.ECKey(masterKey);
+    this.eckey.setCompressed(true);
+    this.extended_public_key = undefined;
+    this.extended_private_key = undefined;
+    this.has_private_key = true;
+    this.build_extended_public_key();
+    this.build_extended_private_key();
+    return this;
 }
 
 BIP32.prototype.init_from_bytes = function(bytes) {
@@ -47,7 +68,7 @@ BIP32.prototype.init_from_bytes = function(bytes) {
 
     // Both pub and private extended keys are 78 bytes
     if ( bytes.length != 78 ) {
-        throw new Error("not enough data");
+        throw new Error("expected 78 bytes of data");
     }
 
     this.version            = u32(bytes.slice(0, 4));
@@ -158,6 +179,10 @@ BIP32.prototype.build_extended_private_key = function() {
 }
 
 BIP32.prototype.extended_private_key_string = function(format) {
+    if (!this.has_private_key) {
+        throw 'no private key';
+    }
+
     if( format === undefined || format === "base58" ) {
         var hash = Crypto.SHA256( Crypto.SHA256( this.extended_private_key, { asBytes: true } ), { asBytes: true } );
         var checksum = hash.slice(0, 4);
@@ -185,10 +210,13 @@ BIP32.prototype.derive = function(path) {
         }
 
         var use_private = (c.length > 1) && (c[c.length-1] == '\'');
-        var child_index = parseInt(use_private ? c.slice(0, c.length - 1) : c) & 0x7fffffff;
+        var child_index = parseInt(use_private ? c.slice(0, c.length - 1) : c);
+        if (c >= 0x80000000) {
+            throw 'index too large';  // index is greater than 31bits
+        }
 
         if( use_private )
-            child_index += 0x80000000;
+            child_index |= 0x80000000;
 
         bip32 = bip32.derive_child(child_index);
     }
@@ -196,14 +224,14 @@ BIP32.prototype.derive = function(path) {
     return bip32;
 }
 
-BIP32.prototype.derive_child = function(i) {
+BIP32.prototype.derive_child = function(child_index) {
     var ib = [];
-    ib.push( (i >> 24) & 0xff );
-    ib.push( (i >> 16) & 0xff );
-    ib.push( (i >>  8) & 0xff );
-    ib.push( i & 0xff );
+    ib.push( (child_index >> 24) & 0xff );
+    ib.push( (child_index >> 16) & 0xff );
+    ib.push( (child_index >>  8) & 0xff );
+    ib.push( child_index & 0xff );
 
-    var use_private = (i & 0x80000000) != 0;
+    var use_private = (child_index & 0x80000000) != 0;
     var ecparams = getSECCurveByName("secp256k1");
 
     if (use_private && (!this.has_private_key || (this.version != MAINNET_PRIVATE && this.version != TESTNET_PRIVATE)) ) {
@@ -253,7 +281,7 @@ BIP32.prototype.derive_child = function(i) {
         ret.has_private_key = false;
     }
 
-    ret.child_index = i;
+    ret.child_index = child_index;
     ret.parent_fingerprint = this.eckey.getPubKeyHash().slice(0,4);
     ret.version = this.version;
     ret.depth   = this.depth + 1;
