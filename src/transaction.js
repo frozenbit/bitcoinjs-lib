@@ -52,6 +52,7 @@
    *
    * Note that this method does not sign the created input.
    */
+  // THIS IS A HORRIBLE API.  THE Transaction OBJECT HAS NO "hash" field.  Can't tell what was intended.
   Transaction.prototype.addInput = function (tx, outIndex) {
     if (arguments[0] instanceof TransactionIn) {
       this.ins.push(arguments[0]);
@@ -516,22 +517,63 @@
   };
 
   /*
-   * Cracks open the transaction and verifies if the signature matches.
+   * Cracks open the transaction and verifies it is fully signed.
    */
-  Transaction.prototype.verifySignatures = function(inputTransaction) {
-/*
- *
- * IMPLEMENT ME
- *
-    for (var index = 0; index < this.ins.lengths; ++index) {
-      var input = this.ins[index];
-      var inputScript = input.script;
-      var scriptType = inputScript.getOutType();
+  Transaction.prototype.verifySignatures = function(inputScripts) {
+    for (var inputIndex = 0; inputIndex < this.ins.length; ++inputIndex) {
+      var input = this.ins[inputIndex];
 
-      var txHashForSigning = this.hashTransactionForSignature(inputScript, index, SIGHASH_ALL);
+      var sigs = [];
+      var pubKeys = [];
+      var scriptToHash;
+
+      // Check the script type to determine number of signatures, the pub keys, and the script to hash.
+      switch(input.script.getInType()) {
+        case 'Multisig':
+          for (var index = 1; index < input.script.chunks.length -1; ++index) {
+            sigs.push(input.script.chunks[index]);
+          }
+          scriptToHash = new Bitcoin.Script(input.script.chunks[input.script.chunks.length - 1]);
+          for (var index = 1; index < scriptToHash.chunks.length - 2; ++index) {
+            pubKeys.push(scriptToHash.chunks[index]);
+          }
+          break;
+        case 'Address':
+          scriptToHash = new Script(Bitcoin.Util.hexToBytes(inputScripts[inputIndex]));
+          sigs.push(input.script.chunks[0]);
+          pubKeys.push(input.script.chunks[1]);
+          break;
+        case 'PubKey':
+          scriptToHash = new Script(Bitcoin.Util.hexToBytes(inputScripts[inputIndex]));
+          sigs.push(Bitcoin.Util.hexToBytes(input.script.chunks[0]));
+          pubKeys.push(scriptToHash.chunks[0]);
+          break;
+        default:
+          return false;
+          break;
+      }
+
+      for (var sigIndex = 0; sigIndex < sigs.length; ++sigIndex) {
+        var hashType = sigs[sigIndex].pop();
+        var signatureHash = this.hashTransactionForSignature(scriptToHash, 0, hashType);
+
+        var validSig = false;
+
+        // Enumerate the possible public keys
+        for (var pubKeyIndex = 0; pubKeyIndex < pubKeys.length; ++pubKeyIndex) {
+          var pubKey = new Bitcoin.ECKey().setPub(pubKeys[pubKeyIndex]);
+          validSig = pubKey.verify(signatureHash, sigs[sigIndex]);
+          if (validSig) {
+            pubKeys.splice(pubKeyIndex, 1);  // remove the pubkey so we can't match 2 sigs against the same pubkey
+            break;
+          }
+        }
+        if (!validSig) {
+          return false;
+        }
+      }
     }
-*/
-    return false;
+    return validSig;
   };
 
   // Enumerate all the inputs, and find any which require a key
@@ -668,11 +710,27 @@
    * transaction. Or it can be called with an Address object and a BigInteger
    * for the amount, in which case a new TransactionOut object with those
    * values will be created.
+   * 
+   * Arguments can be:
+   *    addOutput(transactionOut)
+   *    addOutput("address:amount")
+   *    addOutput(Bitcoin.Address, value)
    */
-  Transaction.prototype.addOutput = function (address, value) {
+  Transaction.prototype.addOutput = function () {
+    var address;
+    var value;
     if (arguments[0] instanceof Bitcoin.TransactionOut) {
       this.outs.push(arguments[0]);
+      return;
+    }
+
+    if (arguments[0].indexOf(':') >= 0) {
+      var args = arguments[0].split(':');
+      address = new Bitcoin.Address(args[0]);
+      value = parseInt(args[1]);
     } else {
+      address = arguments[0];
+      value = arguments[1];
       if (value instanceof BigInteger) {
         value = value.toByteArrayUnsigned().reverse();
         while (value.length < 8) value.push(0);
@@ -683,12 +741,12 @@
         value = value.toByteArrayUnsigned().reverse();
         while (value.length < 8) value.push(0);
       }
-  
-      this.outs.push(new Bitcoin.TransactionOut({
-        value: value,
-        script: Bitcoin.Script.createOutputScript(address)
-      }));
     }
+  
+    this.outs.push(new Bitcoin.TransactionOut({
+      value: value,
+      script: Bitcoin.Script.createOutputScript(address)
+    }));
   };
 
   Transaction.prototype.clearOutputs = function (tx) {

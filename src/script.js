@@ -172,15 +172,21 @@
    */
   Script.prototype.getInType = function ()
   {
-    if (this.chunks.length == 1 &&
-        Bitcoin.Util.isArray(this.chunks[0])) {
+    var chunks = this.chunks;
+    if (chunks.length == 1 &&
+        Bitcoin.Util.isArray(chunks[0])) {
       // Direct IP to IP transactions only have the signature in their scriptSig.
       // TODO: We could also check that the length of the data is correct.
       return 'Pubkey';
-    } else if (this.chunks.length == 2 &&
-               Bitcoin.Util.isArray(this.chunks[0]) &&
-               Bitcoin.Util.isArray(this.chunks[1])) {
+    } else if (chunks.length == 2 &&
+               Bitcoin.Util.isArray(chunks[0]) &&
+               Bitcoin.Util.isArray(chunks[1])) {
       return 'Address';
+    } else if (chunks[0] == ops.OP_0 &&
+        chunks.slice(1).reduce(function(t, chunk, i) {
+            return t && Array.isArray(chunk) && (chunk[0] == 48 || i == chunks.length - 2);
+        }, true)) {
+        return 'Multisig';
     } else {
       return 'Strange';
     }
