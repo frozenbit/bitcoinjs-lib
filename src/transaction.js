@@ -3,16 +3,15 @@
 
   var Transaction = Bitcoin.Transaction = function (doc) {
     this.version = 1;
-    this.lock_time = 0;
+    this.locktime = 0;
     this.ins = [];
     this.outs = [];
     this.timestamp = null;
     this.block = null;
 
     if (doc) {
-      if (doc.hash) this.hash = doc.hash;
       if (doc.version) this.version = doc.version;
-      if (doc.lock_time) this.lock_time = doc.lock_time;
+      if (doc.locktime) this.locktime = doc.locktime;
       if (doc.ins && doc.ins.length) {
         for (var i = 0; i < doc.ins.length; i++) {
           this.addInput(new TransactionIn(doc.ins[i]));
@@ -52,21 +51,50 @@
    *
    * Note that this method does not sign the created input.
    */
-  // THIS IS A HORRIBLE API.  THE Transaction OBJECT HAS NO "hash" field.  Can't tell what was intended.
   Transaction.prototype.addInput = function (tx, outIndex) {
     if (arguments[0] instanceof TransactionIn) {
       this.ins.push(arguments[0]);
-    } else {
-      this.ins.push(new TransactionIn({
-        outpoint: {
-          hash: tx.hash,
-          index: outIndex
-        },
-        script: new Bitcoin.Script(),
-        sequence: 4294967295
-      }));
+      return;
     }
+
+    if (!(tx instanceof Transaction) || typeof(outIndex) != 'number') {
+      throw 'invalid argument';
+    }
+
+    // txHash should be a hex-encoded string.
+
+    this.ins.push(new TransactionIn({
+      outpoint: {
+        hash: Bitcoin.Util.bytesToHex(tx.getHashBytes()),
+        index: outIndex
+      },
+      script: tx.outs[outIndex].script,
+      sequence: 4294967295
+    }));
   };
+  /*
+  Transaction.prototype.addInput = function (txHash, outIndex) {
+    if (arguments[0] instanceof TransactionIn) {
+      this.ins.push(arguments[0]);
+      return;
+    }
+
+    if (!txHash || typeof(txHash) != 'string' || typeof(outIndex) != 'number') {
+      throw 'invalid argument';
+    }
+
+    // txHash should be a hex-encoded string.
+
+    this.ins.push(new TransactionIn({
+      outpoint: {
+        hash: txHash,
+        index: outIndex
+      },
+      script: new Bitcoin.Script(),
+      sequence: 4294967295
+    }));
+  };
+  */
 
   Transaction.prototype.clearInputs = function (tx) {
     this.ins = [];
@@ -86,7 +114,7 @@
     buffer = buffer.concat(Bitcoin.Util.numToVarInt(this.ins.length));
     for (var i = 0; i < this.ins.length; i++) {
       var txin = this.ins[i];
-      buffer = buffer.concat(Crypto.util.base64ToBytes(txin.outpoint.hash));
+      buffer = buffer.concat(Crypto.util.hexToBytes(txin.outpoint.hash).reverse());
       buffer = buffer.concat(Crypto.util.wordsToBytes([parseInt(txin.outpoint.index)]).reverse());
       var scriptBytes = txin.script.buffer;
       buffer = buffer.concat(Bitcoin.Util.numToVarInt(scriptBytes.length));
@@ -96,12 +124,12 @@
     buffer = buffer.concat(Bitcoin.Util.numToVarInt(this.outs.length));
     for (var i = 0; i < this.outs.length; i++) {
       var txout = this.outs[i];
-      buffer = buffer.concat(txout.value);
+      buffer = buffer.concat(Bitcoin.Util.numToBytes(txout.value, 8));
       var scriptBytes = txout.script.buffer;
       buffer = buffer.concat(Bitcoin.Util.numToVarInt(scriptBytes.length));
       buffer = buffer.concat(scriptBytes);
     }
-    buffer = buffer.concat(Crypto.util.wordsToBytes([parseInt(this.lock_time)]).reverse());
+    buffer = buffer.concat(Crypto.util.wordsToBytes([parseInt(this.locktime)]).reverse());
 
     return buffer;
   };
@@ -149,7 +177,7 @@
         if (i != inIndex)
           txTmp.ins[i].sequence = 0;
     } else if ((hashType & 0x1f) == SIGHASH_SINGLE) {
-      // TODO: Implement
+      throw 'sighash_single not implemented';
     }
 
     // Blank out other inputs completely, not recommended for open transactions
@@ -169,7 +197,7 @@
   /**
    * Calculate and return the transaction's hash.
    */
-  Transaction.prototype.getHash = function ()
+  Transaction.prototype.getHashBytes = function ()
   {
     var buffer = this.serialize();
     return Crypto.SHA256(Crypto.SHA256(buffer, {asBytes: true}), {asBytes: true});
@@ -182,7 +210,7 @@
   {
     var newTx = new Transaction();
     newTx.version = this.version;
-    newTx.lock_time = this.lock_time;
+    newTx.locktime = this.locktime;
     for (var i = 0; i < this.ins.length; i++) {
       var txin = this.ins[i].clone();
       newTx.addInput(txin);
@@ -200,9 +228,9 @@
    * Returns an object with properties 'impact', 'type' and 'addr'.
    *
    * 'impact' is an object, see Transaction#calcImpact.
-   * 
+   *
    * 'type' can be one of the following:
-   * 
+   *
    * recv:
    *   This is an incoming transaction, the wallet received money.
    *   'addr' contains the first address in the wallet that receives money
@@ -320,64 +348,14 @@
    */
   Transaction.prototype.getTotalValue = Transaction.prototype.getTotalOutValue;
 
-  /**
-   * Calculates the impact a transaction has on this wallet.
-   *
-   * Based on the its public keys, the wallet will calculate the
-   * credit or debit of this transaction.
-   *
-   * It will return an object with two properties:
-   *  - sign: 1 or -1 depending on sign of the calculated impact.
-   *  - value: amount of calculated impact
-   *
-   * @returns Object Impact on wallet
-   */
-  Transaction.prototype.calcImpact = function (wallet) {
-    if (!(wallet instanceof Bitcoin.Wallet)) return BigInteger.ZERO;
-
-    // Calculate credit to us from all outputs
-    var valueOut = BigInteger.ZERO;
-    for (var j = 0; j < this.outs.length; j++) {
-      var txout = this.outs[j];
-      var hash = Crypto.util.bytesToBase64(txout.script.simpleOutPubKeyHash());
-      if (wallet.hasHash(hash)) {
-        valueOut = valueOut.add(Bitcoin.Util.valueToBigInt(txout.value));
-      }
-    }
-
-    // Calculate debit to us from all ins
-    var valueIn = BigInteger.ZERO;
-    for (var j = 0; j < this.ins.length; j++) {
-      var txin = this.ins[j];
-      var hash = Crypto.util.bytesToBase64(txin.script.simpleInPubKeyHash());
-      if (wallet.hasHash(hash)) {
-        var fromTx = wallet.txIndex[txin.outpoint.hash];
-        if (fromTx) {
-          valueIn = valueIn.add(Bitcoin.Util.valueToBigInt(fromTx.outs[txin.outpoint.index].value));
-        }
-      }
-    }
-    if (valueOut.compareTo(valueIn) >= 0) {
-      return {
-        sign: 1,
-        value: valueOut.subtract(valueIn)
-      };
-    } else {
-      return {
-        sign: -1,
-        value: valueIn.subtract(valueOut)
-      };
-    }
-  };
-
   var TransactionIn = Bitcoin.TransactionIn = function (data)
   {
-    this.outpoint = data.outpoint;
-    if (data.script instanceof Script) {
-      this.script = data.script;
-    } else {
-      this.script = new Script(data.script);
+    if (!data || !(data.script instanceof Script) || !data.outpoint || !(typeof(data.outpoint.hash) == 'string') || !(typeof(data.outpoint.index) == 'number')) {
+      throw 'illegal argument';
     }
+
+    this.outpoint = data.outpoint;
+    this.script = data.script;
     this.sequence = data.sequence;
   };
 
@@ -396,26 +374,19 @@
 
   var TransactionOut = Bitcoin.TransactionOut = function (data)
   {
-    if (data.script instanceof Script) {
-      this.script = data.script;
-    } else {
-      this.script = new Script(data.script);
+    if (!data || !(data.script instanceof Script) || !(typeof(data.value) == 'number')) {
+      throw 'invalid argument';
     }
 
-    if (Bitcoin.Util.isArray(data.value)) {
-      this.value = data.value;
-    } else if ("string" == typeof data.value) {
-      var valueHex = (new BigInteger(data.value, 10)).toString(16);
-      while (valueHex.length < 16) valueHex = "0" + valueHex;
-      this.value = Crypto.util.hexToBytes(valueHex);
-    }
+    this.script = data.script;
+    this.value = data.value;
   };
 
   TransactionOut.prototype.clone = function ()
   {
     var newTxout = new TransactionOut({
       script: this.script.clone(),
-      value: this.value.slice(0)
+      value: this.value
     });
     return newTxout;
   };
@@ -486,7 +457,7 @@
         var seq = u32(f);
         var txin = new Bitcoin.TransactionIn({
             outpoint: {
-                hash: Crypto.util.bytesToBase64(op),
+                hash: Crypto.util.bytesToHex(op.reverse()),
                 index: n
             },
             script: new Bitcoin.Script(script),
@@ -505,14 +476,14 @@
         var script = readString(f);
 
         var txout = new Bitcoin.TransactionOut({
-            value: value,
+            value: Bitcoin.Util.bytesToNum(value),
             script: new Bitcoin.Script(script)
         });
 
         sendTx.addOutput(txout);
     }
-    var lock_time = u32(f);
-    sendTx.lock_time = lock_time;
+    var locktime = u32(f);
+    sendTx.locktime = locktime;
     return sendTx;
   };
 
@@ -582,12 +553,16 @@
   // Returns the number of inputs signed.
   Transaction.prototype.signWithKey = function(key) {
     var signatureCount = 0;
-  
+
     var keyHash = key.getPubKeyHash();
     for (var index = 0; index < this.ins.length; ++index) {
       var input = this.ins[index];
       var inputScript = input.script;
-  
+
+      if (inputScript.chunks.length == 0) {
+        throw 'transaction input missing script';
+      }
+
       if (inputScript.simpleOutHash().compare(keyHash)) {
         var hashType = 1;  // SIGHASH_ALL
         var hash = this.hashTransactionForSignature(inputScript, index, hashType);
@@ -618,28 +593,33 @@
   Transaction.prototype.signWithMultiSigScript = function(keyArray, redeemScriptBytes) {
     var hashType = 1;  // SIGHASH_ALL
     var signatureCount = 0;
-  
+
+    if (!(keyArray instanceof Array) || !(redeemScriptBytes instanceof Array)) {
+      throw 'invalid argument';
+    }
+    keyArray.forEach(function(key) { if (!(key instanceof Bitcoin.ECKey)) { throw 'invalid key'; } });
+
     // First figure out how many signatures we need.
     var redeemScript = new Bitcoin.Script(redeemScriptBytes);
     var numSigsRequired = redeemScript.chunks[0] - Bitcoin.Opcode.map.OP_1 + 1;
-    if (numSigsRequired < 0 || numSigsRequired > 3) {
+    if (numSigsRequired < 0 || numSigsRequired > 15) {
       throw "Can't determine required number of signatures";
     }
     var redeemScriptHash = Bitcoin.Util.sha256ripe160(redeemScriptBytes);
-  
+
     var self = this;
     this.ins.forEach(function(input, inputIndex) {
       var inputScript = input.script;
-  
+
       // This reedem script applies under two cases:
       //   a) The input has no signatures yet, is a P2SH input script, and hash a hash matching this redeemscript.
       //   b) The input some signatures already, but needs more.
-  
+
       if (inputScript.getOutType() == 'P2SH' &&
           inputScript.simpleOutHash().compare(redeemScriptHash)) {
         // This is a matching P2SH input.  Create a template Script with
         // 0's as placeholders for the signatures.
-  
+
         var script = new Bitcoin.Script();
         script.writeOp(Bitcoin.Opcode.map.OP_0);  // BIP11 requires this leading OP_0.
         for (var index = 0; index < numSigsRequired; ++index) {
@@ -648,20 +628,20 @@
         script.writeBytes(redeemScriptBytes);  // The redeemScript itself.
         inputScript = self.ins[inputIndex].script = script;
       }
-  
+
       // Check if the input script looks like a partially signed template.
       // If so, apply as many signatures as we can.
       if ((inputScript.chunks.length == numSigsRequired + 2) &&
           (inputScript.chunks[0] == Bitcoin.Opcode.map.OP_0) &&
           (inputScript.chunks[numSigsRequired+1].compare(redeemScriptBytes))) {
         var keyIndex = 0;  // keys we've used so far for this input.
-  
+
         var hashToSign = self.hashTransactionForSignature(redeemScript, inputIndex, hashType);
-  
+
         // Create a new script, insert the leading OP_0.
         var script = new Bitcoin.Script();
         script.writeOp(Bitcoin.Opcode.map.OP_0);
-  
+
         // For the rest of the sigs, either copy or insert a new one.
         for (var index = 1; index < 1 + numSigsRequired; ++index) {
           if (inputScript.chunks[index] != 0) {  // Already signed case
@@ -672,11 +652,16 @@
               var key = keyArray[keyIndex++];  // increment keys tried
               var signature = key.sign(hashToSign);
               signature.push(parseInt(hashType, 10));
-  
+
               // Verify that this signature hasn't already been applied.
               var isDuplicateSignature = false;
               for (var index2 = 1; index2 < 1 + numSigsRequired; ++index2) {
-                if (signature.compare(inputScript.chunks[index2])) {
+                if (inputScript.chunks[index2] == 0) {
+                  break;  // No more signatures to check
+                }
+                var oldSig = inputScript.chunks[index2].slice(0);  // make a copy of the old sig
+                oldSig.pop();  // Remove the hashtype.
+                if (key.verify(hashToSign, oldSig)) {
                   isDuplicateSignature = true;
                   break;
                 }
@@ -710,39 +695,21 @@
    * transaction. Or it can be called with an Address object and a BigInteger
    * for the amount, in which case a new TransactionOut object with those
    * values will be created.
-   * 
+   *
    * Arguments can be:
    *    addOutput(transactionOut)
-   *    addOutput("address:amount")
    *    addOutput(Bitcoin.Address, value)
    */
-  Transaction.prototype.addOutput = function () {
-    var address;
-    var value;
+  Transaction.prototype.addOutput = function (address, value) {
     if (arguments[0] instanceof Bitcoin.TransactionOut) {
       this.outs.push(arguments[0]);
       return;
     }
 
-    if (arguments[0].indexOf(':') >= 0) {
-      var args = arguments[0].split(':');
-      address = new Bitcoin.Address(args[0]);
-      value = parseInt(args[1]);
-    } else {
-      address = arguments[0];
-      value = arguments[1];
-      if (value instanceof BigInteger) {
-        value = value.toByteArrayUnsigned().reverse();
-        while (value.length < 8) value.push(0);
-      } else if (Bitcoin.Util.isArray(value)) {
-        // Nothing to do
-      } else if ( typeof(value) == 'number') {
-        value = BigInteger.valueOf(value);
-        value = value.toByteArrayUnsigned().reverse();
-        while (value.length < 8) value.push(0);
-      }
+    if (!address || !(address instanceof Bitcoin.Address) || typeof(value) != 'number') {
+      throw 'invalid argument';
     }
-  
+
     this.outs.push(new Bitcoin.TransactionOut({
       value: value,
       script: Bitcoin.Script.createOutputScript(address)
