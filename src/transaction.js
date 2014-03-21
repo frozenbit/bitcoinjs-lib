@@ -72,29 +72,6 @@
       sequence: 4294967295
     }));
   };
-  /*
-  Transaction.prototype.addInput = function (txHash, outIndex) {
-    if (arguments[0] instanceof TransactionIn) {
-      this.ins.push(arguments[0]);
-      return;
-    }
-
-    if (!txHash || typeof(txHash) != 'string' || typeof(outIndex) != 'number') {
-      throw 'invalid argument';
-    }
-
-    // txHash should be a hex-encoded string.
-
-    this.ins.push(new TransactionIn({
-      outpoint: {
-        hash: txHash,
-        index: outIndex
-      },
-      script: new Bitcoin.Script(),
-      sequence: 4294967295
-    }));
-  };
-  */
 
   Transaction.prototype.clearInputs = function (tx) {
     this.ins = [];
@@ -489,8 +466,24 @@
 
   /*
    * Cracks open the transaction and verifies it is fully signed.
+   * inputScripts is an array of Script objects or hex-encoded strings representing the scripts to be
+   * used in the hash signature.
    */
   Transaction.prototype.verifySignatures = function(inputScripts) {
+    if (!(inputScripts instanceof Array)) {
+      throw 'illegal argument';
+    } else {
+      for (var index = 0; index < inputScripts.length; ++index) {
+        if (typeof(inputScripts[index]) == 'string') {
+          inputScripts[index] = new Script(Bitcoin.Util.hexToBytes(inputScripts[index]));
+        }
+        if (!(inputScripts[index] instanceof Bitcoin.Script)) {
+          throw 'illegal argument';
+        }
+      };
+    }
+
+    var numVerifiedSignatures = 0;
     for (var inputIndex = 0; inputIndex < this.ins.length; ++inputIndex) {
       var input = this.ins[inputIndex];
 
@@ -510,12 +503,12 @@
           }
           break;
         case 'Address':
-          scriptToHash = new Script(Bitcoin.Util.hexToBytes(inputScripts[inputIndex]));
+          scriptToHash = inputScripts[inputIndex];
           sigs.push(input.script.chunks[0]);
           pubKeys.push(input.script.chunks[1]);
           break;
         case 'PubKey':
-          scriptToHash = new Script(Bitcoin.Util.hexToBytes(inputScripts[inputIndex]));
+          scriptToHash = inputScripts[inputIndex];
           sigs.push(Bitcoin.Util.hexToBytes(input.script.chunks[0]));
           pubKeys.push(scriptToHash.chunks[0]);
           break;
@@ -540,11 +533,12 @@
           }
         }
         if (!validSig) {
-          return false;
+          throw 'invalid signature';
         }
+        numVerifiedSignatures++;
       }
     }
-    return validSig;
+    return numVerifiedSignatures;
   };
 
   // Enumerate all the inputs, and find any which require a key
