@@ -13,6 +13,9 @@
      * Ported to JavaScript by Stefan Thomas.
      */
     encode: function (input) {
+      if (!(input instanceof Array)) {
+        throw 'illegal argument';
+      }
       var bi = BigInteger.fromByteArrayUnsigned(input);
       var chars = [];
 
@@ -42,13 +45,16 @@
      * Ported to JavaScript by Stefan Thomas.
      */
     decode: function (input) {
+      if (typeof(input) != 'string') {
+        throw 'illegal argument';
+      }
       var bi = BigInteger.valueOf(0);
       var leadingZerosNum = 0;
       for (var i = input.length - 1; i >= 0; i--) {
         var alphaIndex = B58.alphabet.indexOf(input[i]);
         if (alphaIndex < 0) {
           throw "Invalid character";
-        }	
+        }
         bi = bi.add(BigInteger.valueOf(alphaIndex)
                     .multiply(B58.base.pow(input.length - 1 -i)));
 
