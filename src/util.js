@@ -184,7 +184,14 @@ Bitcoin.Util = {
   },
 
   hexToBytes: function(hex) {
-    return Crypto.util.hexToBytes(hex);
+    for (var bytes = [], c = 0; c < hex.length; c += 2) {
+      var byte = parseInt(hex.substr(c, 2), 16);
+      if (isNaN(byte)) {
+        throw 'illegal input';
+      }
+      bytes.push(byte);
+    }
+    return bytes;
   },
 
   /**
