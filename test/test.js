@@ -571,9 +571,9 @@ test("bytesToBase64 - ok", function() {
 
   for (var index = 0; index < testArrays.length; ++index) {
     var a = testArrays[index];
-    var s = Bitcoin.Util.bytesToBase64(a);
+    var s = Crypto.util.bytesToBase64(a);
     ok(s, 'encoded test array #' + index);
-    var a2 = Bitcoin.Util.base64ToBytes(s);
+    var a2 = Crypto.util.base64ToBytes(s);
     ok(a2, 'decoded test array #' + index);
     deepEqual(a, a2, 'decoded array #' + index + ' matched');
   }

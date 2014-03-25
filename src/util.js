@@ -194,6 +194,17 @@ Bitcoin.Util = {
     return bytes;
   },
 
+  bytesToHex: function (bytes) {
+    for (var hex = [], i = 0; i < bytes.length; i++) {
+      if (bytes[i] > 0xff) {
+        throw 'illegal input';
+      }
+      hex.push((bytes[i] >>> 4).toString(16));
+      hex.push((bytes[i] & 0xF).toString(16));
+    }
+    return hex.join("");
+  },
+
   /**
    * Parse a Bitcoin value byte array, returning a BigInteger.
    */
@@ -267,9 +278,3 @@ Bitcoin.Util = {
     return Crypto.SHA256(Crypto.SHA256(data, { asBytes: true }), { asBytes: true });
   }
 };
-
-for (var i in Crypto.util) {
-  if (Crypto.util.hasOwnProperty(i)) {
-    Bitcoin.Util[i] = Crypto.util[i];
-  }
-}
