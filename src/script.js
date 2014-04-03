@@ -184,7 +184,8 @@
       return 'Address';
     } else if (chunks[0] == ops.OP_0 &&
         chunks.slice(1).reduce(function(t, chunk, i) {
-            return t && Array.isArray(chunk) && (chunk[0] == 48 || i == chunks.length - 2);
+            // Partially signed transactions may have a place holder OP_0.
+            return t && (chunk == ops.OP_0 || (Array.isArray(chunk) && (chunk[0] == 48 || i == chunks.length - 2)));
         }, true)) {
         return 'Multisig';
     } else {

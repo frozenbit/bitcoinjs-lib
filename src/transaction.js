@@ -518,6 +518,11 @@
       }
 
       for (var sigIndex = 0; sigIndex < sigs.length; ++sigIndex) {
+        // If this is an OP_0, then its been left as a placeholder for a future sig.
+        if (sigs[sigIndex] == Bitcoin.Opcode.map.OP_0) {
+          continue;
+        }
+
         var hashType = sigs[sigIndex].pop();
         var signatureHash = this.hashTransactionForSignature(scriptToHash, 0, hashType);
 
@@ -601,6 +606,20 @@
     }
     var redeemScriptHash = Bitcoin.Util.sha256ripe160(redeemScriptBytes);
 
+    // Verify that a key is actually valid for this P2SH redeemScript.
+    var redeemScriptContainsPubKey = function(redeemScript, key) {
+      if (!(key instanceof Bitcoin.ECKey)) { throw 'invalid argument'; }
+      if (!(redeemScript instanceof Bitcoin.Script)) { throw 'invalid argument'; }
+      var pubKey = key.getPub().toString();
+      for (var pubKeyIndex = 1; pubKeyIndex < redeemScript.chunks.length - 2; ++pubKeyIndex) {
+        var redeemScriptPubKey = redeemScript.chunks[pubKeyIndex]
+        if (redeemScriptPubKey.toString() == pubKey.toString()) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     var self = this;
     this.ins.forEach(function(input, inputIndex) {
       var inputScript = input.script;
@@ -663,6 +682,11 @@
               if (isDuplicateSignature) {
                 continue;  // try another key
               }
+
+              if (!redeemScriptContainsPubKey(redeemScript, key)) {
+                continue;  // try another key
+              }
+
               script.writeBytes(signature);  // Apply the signature
               signatureCount++;
               signed = true;
