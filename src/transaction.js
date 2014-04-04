@@ -464,11 +464,83 @@
     return sendTx;
   };
 
-  /*
-   * Cracks open the transaction and verifies it is fully signed.
-   * inputScripts is an array of Script objects or hex-encoded strings representing the scripts to be
-   * used in the hash signature.
-   */
+
+  // Verify the signature on an input.
+  // If the transaction is fully signed, returns a positive number representing the number of valid signatures.
+  // If the transaction is partially signed, returns a negative number representing the number of valid signatures.
+  Transaction.prototype.verifyInputSignatures = function(inputIndex, pubScript) {
+    if (inputIndex < 0 || inputIndex >= this.ins.length) {
+      throw 'illegal index';
+    }
+    if (!(pubScript instanceof Bitcoin.Script)) {
+      throw 'illegal argument';
+    }
+
+    var sigScript = this.ins[inputIndex].script;
+    var sigsNeeded = 1;
+    var sigs = [];
+    var pubKeys = [];
+
+    // Check the script type to determine number of signatures, the pub keys, and the script to hash.
+    switch(sigScript.getInType()) {
+      case 'Multisig':
+        // Replace the pubScript with the P2SH Script.
+        var p2shBytes = sigScript.chunks[sigScript.chunks.length -1];
+        pubScript = new Bitcoin.Script(p2shBytes);
+        sigsNeeded = pubScript.chunks[0] - Bitcoin.Opcode.map.OP_1 + 1;
+        for (var index = 1; index < sigScript.chunks.length -1; ++index) {
+          sigs.push(sigScript.chunks[index]);
+        }
+        for (var index = 1; index < pubScript.chunks.length - 2; ++index) {
+          pubKeys.push(pubScript.chunks[index]);
+        }
+        break;
+      case 'Address':
+        sigsNeeded = 1;
+        sigs.push(sigScript.chunks[0]);
+        pubKeys.push(sigScript.chunks[1]);
+        break;
+      default:
+        return 0;
+        break;
+    }
+
+    var numVerifiedSignatures = 0;
+    for (var sigIndex = 0; sigIndex < sigs.length; ++sigIndex) {
+      // If this is an OP_0, then its been left as a placeholder for a future sig.
+      if (sigs[sigIndex] == Bitcoin.Opcode.map.OP_0) {
+        continue;
+      }
+
+      var hashType = sigs[sigIndex].pop();
+      var signatureHash = this.hashTransactionForSignature(pubScript, inputIndex, hashType);
+
+      var validSig = false;
+
+      // Enumerate the possible public keys
+      for (var pubKeyIndex = 0; pubKeyIndex < pubKeys.length; ++pubKeyIndex) {
+        var pubKey = new Bitcoin.ECKey().setPub(pubKeys[pubKeyIndex]);
+        validSig = pubKey.verify(signatureHash, sigs[sigIndex]);
+        if (validSig) {
+          pubKeys.splice(pubKeyIndex, 1);  // remove the pubkey so we can't match 2 sigs against the same pubkey
+          break;
+        }
+      }
+      if (!validSig) {
+        throw 'invalid signature';
+      }
+      numVerifiedSignatures++;
+    }
+
+    if (numVerifiedSignatures < sigsNeeded) {
+      numVerifiedSignatures = -numVerifiedSignatures;
+    }
+    return numVerifiedSignatures;
+  };
+
+
+  // Verify that all inputs in a transaction are signed.
+  // Returns the number of inputs that are fully signed.
   Transaction.prototype.verifySignatures = function(inputScripts) {
     if (!(inputScripts instanceof Array)) {
       throw 'illegal argument';
@@ -485,65 +557,206 @@
 
     var numVerifiedSignatures = 0;
     for (var inputIndex = 0; inputIndex < this.ins.length; ++inputIndex) {
-      var input = this.ins[inputIndex];
-
-      var sigs = [];
-      var pubKeys = [];
-      var scriptToHash;
-
-      // Check the script type to determine number of signatures, the pub keys, and the script to hash.
-      switch(input.script.getInType()) {
-        case 'Multisig':
-          for (var index = 1; index < input.script.chunks.length -1; ++index) {
-            sigs.push(input.script.chunks[index]);
-          }
-          scriptToHash = new Bitcoin.Script(input.script.chunks[input.script.chunks.length - 1]);
-          for (var index = 1; index < scriptToHash.chunks.length - 2; ++index) {
-            pubKeys.push(scriptToHash.chunks[index]);
-          }
-          break;
-        case 'Address':
-          scriptToHash = inputScripts[inputIndex];
-          sigs.push(input.script.chunks[0]);
-          pubKeys.push(input.script.chunks[1]);
-          break;
-        case 'PubKey':
-          scriptToHash = inputScripts[inputIndex];
-          sigs.push(Bitcoin.Util.hexToBytes(input.script.chunks[0]));
-          pubKeys.push(scriptToHash.chunks[0]);
-          break;
-        default:
-          return false;
-          break;
-      }
-
-      for (var sigIndex = 0; sigIndex < sigs.length; ++sigIndex) {
-        // If this is an OP_0, then its been left as a placeholder for a future sig.
-        if (sigs[sigIndex] == Bitcoin.Opcode.map.OP_0) {
-          continue;
+      try {
+        var fullySigned = (this.verifyInputSignatures(inputIndex, inputScripts[inputIndex]) > 0);
+        if (fullySigned) {
+          numVerifiedSignatures++;
         }
-
-        var hashType = sigs[sigIndex].pop();
-        var signatureHash = this.hashTransactionForSignature(scriptToHash, 0, hashType);
-
-        var validSig = false;
-
-        // Enumerate the possible public keys
-        for (var pubKeyIndex = 0; pubKeyIndex < pubKeys.length; ++pubKeyIndex) {
-          var pubKey = new Bitcoin.ECKey().setPub(pubKeys[pubKeyIndex]);
-          validSig = pubKey.verify(signatureHash, sigs[sigIndex]);
-          if (validSig) {
-            pubKeys.splice(pubKeyIndex, 1);  // remove the pubkey so we can't match 2 sigs against the same pubkey
-            break;
-          }
-        }
-        if (!validSig) {
-          throw 'invalid signature';
-        }
-        numVerifiedSignatures++;
+      } catch (e) {
       }
     }
     return numVerifiedSignatures;
+  };
+
+  //
+  // A Proof is information needed to sign a particular input.
+  //
+
+  // Create a proof for a single-key input
+  Transaction.prototype.createStandardProof = function(key) {
+    if (!(key instanceof Bitcoin.ECKey)) { throw 'invalid argument'; }
+
+    return {
+      hash: Bitcoin.Util.bytesToHex(key.getPubKeyHash()),
+      key: key
+    }
+  };
+
+  Transaction.prototype.createP2SHProof = function(redeemScript) {
+    if (!(redeemScript instanceof Bitcoin.Script)) { throw 'invalid argument'; }
+
+    return {
+      scriptHash: Bitcoin.Util.bytesToHex(Bitcoin.Util.sha256ripe160(redeemScript.buffer)),
+      redeemScript: redeemScript
+    }
+  };
+
+  // Sign a specific input.
+  Transaction.prototype.signInput = function(inputIndex, proof, hashType) {
+    // 1. Verify that the proof matches the input.
+    // 2. Sign it.
+
+    hashType = hashType || SIGHASH_ALL;
+
+    if (inputIndex < 0 || inputIndex >= this.ins.length) {
+      throw 'illegal index';
+    }
+
+    var input = this.ins[inputIndex];
+
+    if (input.script.chunks.length == 0) {
+      throw 'transaction input missing script';
+    }
+
+    var scriptType = input.script.getOutType();
+
+    if (scriptType == 'Address') {
+      if (Bitcoin.Util.bytesToHex(input.script.simpleOutHash()) != proof.hash) {
+        throw 'invalid proof';
+      }
+      var hash = this.hashTransactionForSignature(input.script, inputIndex, hashType);
+      var signature = proof.key.sign(hash);
+      signature.push(parseInt(hashType, 10));
+      input.script = Bitcoin.Script.createInputScript(signature, proof.key.getPub());
+      return true;
+    }
+
+    if (scriptType == 'P2SH') {
+      if (Bitcoin.Util.bytesToHex(input.script.simpleOutHash()) != proof.scriptHash) {
+        throw 'invalid proof';
+      }
+
+      var numSigsRequired = proof.redeemScript.chunks[0] - Bitcoin.Opcode.map.OP_1 + 1;
+      if (numSigsRequired < 0 || numSigsRequired > 15) {
+        throw "Can't determine required number of signatures";
+      }
+
+      // Replace the input script with a MultiSig style input signature.
+      // For now we leave OP_0 placeholders for all the actual sigs.
+      var script = new Bitcoin.Script();
+      script.writeOp(Bitcoin.Opcode.map.OP_0);  // BIP11 requires this leading OP_0.
+      for (var index = 0; index < numSigsRequired; ++index) {
+        script.writeOp(Bitcoin.Opcode.map.OP_0);  // A placeholder for each sig
+      }
+      script.writeBytes(proof.redeemScript.buffer);  // The redeemScript itself.
+      input.script = script;
+
+      // At this point, the script looks like a "Multisig" out script, because
+      // we've actually replaced it with a multi-sig placeholder for P2SH
+      return false;  // return false because we didn't actually sign anything
+    }
+
+    if (scriptType == 'Strange') {
+      // We hope this is a partially signed transaction and that the script is now:
+      //    0 [sig] [sig] ... [redeemScript]
+
+      // Verify that a key is actually valid for this P2SH redeemScript.
+      var redeemScriptContainsPubKey = function(redeemScript, key) {
+        if (!(key instanceof Bitcoin.ECKey)) { throw 'invalid argument'; }
+        if (!(redeemScript instanceof Bitcoin.Script)) { throw 'invalid argument'; }
+        var pubKey = key.getPub().toString();
+        for (var pubKeyIndex = 1; pubKeyIndex < redeemScript.chunks.length - 2; ++pubKeyIndex) {
+          var redeemScriptPubKey = redeemScript.chunks[pubKeyIndex]
+          if (redeemScriptPubKey.toString() == pubKey.toString()) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      // Returns true if this key has already signed this script
+      var isDuplicateSignature = function(script, hashToSign, numSigsRequired, key) {
+        for (var index = 1; index < 1 + numSigsRequired; ++index) {
+          if (script.chunks[index] == 0) {
+            break;  // No more signatures to check
+          }
+          var oldSig = script.chunks[index].slice(0);  // make a copy of the old sig
+          oldSig.pop();  // Remove the hashtype.
+          if (key.verify(hashToSign, oldSig)) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      var redeemScript = new Bitcoin.Script(input.script.chunks[input.script.chunks.length - 1]);
+      if (redeemScript.getOutType() != 'Multisig') {
+        throw 'unrecognized input type';
+      }
+      var numSigsRequired = redeemScript.chunks[0] - Bitcoin.Opcode.map.OP_1 + 1;
+
+      if (numSigsRequired < 0 || numSigsRequired > 15) {
+        throw "Can't determine required number of signatures";
+      }
+
+      var hashToSign = this.hashTransactionForSignature(redeemScript, inputIndex, hashType);
+
+      // Create a new script, insert the leading OP_0.
+      var script = new Bitcoin.Script();
+      script.writeOp(Bitcoin.Opcode.map.OP_0);
+
+      // For the rest of the sigs, either copy or insert a new one.
+      var signed = false;
+      for (var index = 1; index < 1 + numSigsRequired; ++index) {
+        if (input.script.chunks[index] != 0) {  // Already signed case
+          script.writeBytes(input.script.chunks[index]);
+          continue;
+        }
+        if (!signed) {
+          if (!redeemScriptContainsPubKey(redeemScript, proof.key)) {
+            return false;
+          }
+
+          if (isDuplicateSignature(input.script, hashToSign, numSigsRequired, proof.key)) {
+            return false;
+          }
+
+          var signature = proof.key.sign(hashToSign);
+          signature.push(parseInt(hashType, 10));
+          script.writeBytes(signature);  // Apply the signature
+          signed = true;
+        } else {
+          // Write another placeholder.
+          script.writeOp(Bitcoin.Opcode.map.OP_0);
+        }
+      }
+      // Finally, record the redeemScript itself and we're done.
+      script.writeBytes(redeemScript.buffer);
+      this.ins[inputIndex].script = script;
+      return true;
+    }
+
+    return false;
+  };
+
+  // Convenience method for signing a single input with a key
+  // Returns true if it could sign, false otherwise.
+  Transaction.prototype.signInputWithKey = function(inputIndex, key) {
+    try {
+      var proof = this.createStandardProof(key);
+      return this.signInput(inputIndex, proof, SIGHASH_ALL);
+    } catch (e) {
+      // Couldn't sign this input.  Continue.
+    }
+    return false;
+  };
+
+  // Convenience method for signing a multi-sig script with a key
+  // Returns true if it could sign, false otherwise.
+  Transaction.prototype.signMultiSigWithKey = function(inputIndex, key, redeemScript) {
+    try {
+      // Before any signatures are present, it looks like a P2SH sigScript.
+      // Convert it to a MultiSig sigScript if necessary.
+      if (this.ins[inputIndex].script.getOutType() == 'P2SH') {
+        var p2shProof = this.createP2SHProof(redeemScript);
+        this.signInput(inputIndex, p2shProof);
+      }
+      var proof = this.createStandardProof(key);
+      return this.signInput(inputIndex, proof);
+    } catch (e) {
+      // Couldn't sign this input.  Continue.
+    }
+    return false;
   };
 
   // Enumerate all the inputs, and find any which require a key
@@ -553,26 +766,13 @@
   Transaction.prototype.signWithKey = function(key) {
     var signatureCount = 0;
 
-    var keyHash = key.getPubKeyHash();
+    var proof = this.createStandardProof(key);
     for (var index = 0; index < this.ins.length; ++index) {
-      var input = this.ins[index];
-      var inputScript = input.script;
-
-      if (inputScript.chunks.length == 0) {
-        throw 'transaction input missing script';
-      }
-
-      if (inputScript.simpleOutHash().compare(keyHash)) {
-        var hashType = 1;  // SIGHASH_ALL
-        var hash = this.hashTransactionForSignature(inputScript, index, hashType);
-        var signature = key.sign(hash);
-        signature.push(parseInt(hashType, 10));
-        var pubKey = key.getPub();
-        var script = new Bitcoin.Script();
-        script.writeBytes(signature);
-        script.writeBytes(pubKey);
-        this.ins[index].script = script;
+      try {
+        this.signInput(index, proof, SIGHASH_ALL);
         signatureCount++;
+      } catch (e) {
+        // Couldn't sign this input.  Continue.
       }
     }
     return signatureCount;
@@ -589,120 +789,31 @@
   // intermediate, partially signed state.
   //
   // Returns the number of signnatures applied in this pass (kind of meaningless)
-  Transaction.prototype.signWithMultiSigScript = function(keyArray, redeemScriptBytes) {
+  Transaction.prototype.signWithMultiSigScript = function(keyArray, redeemScript) {
     var hashType = 1;  // SIGHASH_ALL
     var signatureCount = 0;
 
-    if (!(keyArray instanceof Array) || !(redeemScriptBytes instanceof Array)) {
+    if (!(keyArray instanceof Array) || !(redeemScript instanceof Bitcoin.Script)) {
       throw 'invalid argument';
     }
     keyArray.forEach(function(key) { if (!(key instanceof Bitcoin.ECKey)) { throw 'invalid key'; } });
 
     // First figure out how many signatures we need.
-    var redeemScript = new Bitcoin.Script(redeemScriptBytes);
     var numSigsRequired = redeemScript.chunks[0] - Bitcoin.Opcode.map.OP_1 + 1;
     if (numSigsRequired < 0 || numSigsRequired > 15) {
       throw "Can't determine required number of signatures";
     }
-    var redeemScriptHash = Bitcoin.Util.sha256ripe160(redeemScriptBytes);
 
-    // Verify that a key is actually valid for this P2SH redeemScript.
-    var redeemScriptContainsPubKey = function(redeemScript, key) {
-      if (!(key instanceof Bitcoin.ECKey)) { throw 'invalid argument'; }
-      if (!(redeemScript instanceof Bitcoin.Script)) { throw 'invalid argument'; }
-      var pubKey = key.getPub().toString();
-      for (var pubKeyIndex = 1; pubKeyIndex < redeemScript.chunks.length - 2; ++pubKeyIndex) {
-        var redeemScriptPubKey = redeemScript.chunks[pubKeyIndex]
-        if (redeemScriptPubKey.toString() == pubKey.toString()) {
-          return true;
-        }
+    for (var index = 0; index < this.ins.length; ++index) {
+      if (this.ins[index].script.getOutType() == 'P2SH') {
+        var p2shProof = this.createP2SHProof(redeemScript);
+        this.signInput(index, p2shProof);
       }
-      return false;
+      var proof = this.createStandardProof(keyArray[0]);
+      if (this.signInput(index, proof)) {
+        signatureCount++;
+      }
     }
-
-    var self = this;
-    this.ins.forEach(function(input, inputIndex) {
-      var inputScript = input.script;
-
-      // This reedem script applies under two cases:
-      //   a) The input has no signatures yet, is a P2SH input script, and hash a hash matching this redeemscript.
-      //   b) The input some signatures already, but needs more.
-
-      if (inputScript.getOutType() == 'P2SH' &&
-          inputScript.simpleOutHash().compare(redeemScriptHash)) {
-        // This is a matching P2SH input.  Create a template Script with
-        // 0's as placeholders for the signatures.
-
-        var script = new Bitcoin.Script();
-        script.writeOp(Bitcoin.Opcode.map.OP_0);  // BIP11 requires this leading OP_0.
-        for (var index = 0; index < numSigsRequired; ++index) {
-          script.writeOp(Bitcoin.Opcode.map.OP_0);  // A placeholder for each sig
-        }
-        script.writeBytes(redeemScriptBytes);  // The redeemScript itself.
-        inputScript = self.ins[inputIndex].script = script;
-      }
-
-      // Check if the input script looks like a partially signed template.
-      // If so, apply as many signatures as we can.
-      if ((inputScript.chunks.length == numSigsRequired + 2) &&
-          (inputScript.chunks[0] == Bitcoin.Opcode.map.OP_0) &&
-          (inputScript.chunks[numSigsRequired+1].compare(redeemScriptBytes))) {
-        var keyIndex = 0;  // keys we've used so far for this input.
-
-        var hashToSign = self.hashTransactionForSignature(redeemScript, inputIndex, hashType);
-
-        // Create a new script, insert the leading OP_0.
-        var script = new Bitcoin.Script();
-        script.writeOp(Bitcoin.Opcode.map.OP_0);
-
-        // For the rest of the sigs, either copy or insert a new one.
-        for (var index = 1; index < 1 + numSigsRequired; ++index) {
-          if (inputScript.chunks[index] != 0) {  // Already signed case
-            script.writeBytes(inputScript.chunks[index]);
-          } else {
-            var signed = false;
-            while (!signed && keyIndex < keyArray.length) {
-              var key = keyArray[keyIndex++];  // increment keys tried
-              var signature = key.sign(hashToSign);
-              signature.push(parseInt(hashType, 10));
-
-              // Verify that this signature hasn't already been applied.
-              var isDuplicateSignature = false;
-              for (var index2 = 1; index2 < 1 + numSigsRequired; ++index2) {
-                if (inputScript.chunks[index2] == 0) {
-                  break;  // No more signatures to check
-                }
-                var oldSig = inputScript.chunks[index2].slice(0);  // make a copy of the old sig
-                oldSig.pop();  // Remove the hashtype.
-                if (key.verify(hashToSign, oldSig)) {
-                  isDuplicateSignature = true;
-                  break;
-                }
-              }
-              if (isDuplicateSignature) {
-                continue;  // try another key
-              }
-
-              if (!redeemScriptContainsPubKey(redeemScript, key)) {
-                continue;  // try another key
-              }
-
-              script.writeBytes(signature);  // Apply the signature
-              signatureCount++;
-              signed = true;
-            }
-            if (!signed) {
-              // We don't have any more keys to sign with!
-              // Write another placeholder.
-              script.writeOp(Bitcoin.Opcode.map.OP_0);
-            }
-          }
-        }
-        // Finally, record the redeemScript itself and we're done.
-        script.writeBytes(redeemScriptBytes);
-        self.ins[inputIndex].script = script;
-      }
-    });
     return signatureCount;
   }
 

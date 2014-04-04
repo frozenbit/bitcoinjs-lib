@@ -5,7 +5,7 @@
     if (!data) {
       this.buffer = [];
     } else if ("string" == typeof data) {
-      this.buffer = Crypto.util.base64ToBytes(data);  // strange to use base64 here!
+      this.buffer = Crypto.util.hexToBytes(data);
     } else if (Bitcoin.Util.isArray(data)) {
       this.buffer = data;
     } else if (data instanceof Script) {

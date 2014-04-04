@@ -390,13 +390,13 @@ test("Sign MultiSig Transaction", function() {
   // We need to add the script to the inputs so that signing can work.
   tx.ins[0].script = new Bitcoin.Script(Bitcoin.Util.hexToBytes('a914f815b036d9bbbce5e9f2a00abd1bf3dc91e9551087'));
 
-  var sigCount = tx.signWithMultiSigScript([key1], multiSigAddress.redeemScript);
+  var sigCount = tx.signWithMultiSigScript([key1], new Bitcoin.Script(multiSigAddress.redeemScript));
   equal(sigCount, 1, 'applied first sig');
 
-  sigCount = tx.signWithMultiSigScript([key1], multiSigAddress.redeemScript);
+  sigCount = tx.signWithMultiSigScript([key1], new Bitcoin.Script(multiSigAddress.redeemScript));
   equal(sigCount, 0, 'duplicate sig failed');
 
-  var sigCount = tx.signWithMultiSigScript([key2], multiSigAddress.redeemScript);
+  var sigCount = tx.signWithMultiSigScript([key2], new Bitcoin.Script(multiSigAddress.redeemScript));
   equal(sigCount, 1, 'applied second sig');
 });
 
