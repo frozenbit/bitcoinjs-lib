@@ -148,7 +148,12 @@ Bitcoin.ECKey = (function () {
     if (!Bitcoin.Util.isArray(chainCode)) {
       throw('chaincode must be a byte array');
     }
-    var eckey = new ECKey(privKey);
+    var eckey;
+    if (privKey instanceof ECKey) {
+      eckey = privKey;
+    } else {
+      eckey = new ECKey(privKey);
+    }
     var privKey = eckey.priv;
     var pubKey = eckey.getPub();
 
