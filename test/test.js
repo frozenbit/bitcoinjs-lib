@@ -313,13 +313,26 @@ test("Decode MultiSig Input Script", function() {
 module("Transaction");
 
 test("Construction", function() {
+  Bitcoin.setNetwork('testnet');
+  var addrString = 'mgv5oJf5tv5YifH9xTuneRNEbRdG5ryocq';
+
   var transaction = new Bitcoin.Transaction();
   ok(transaction, "create");
+  transaction.addOutput(new Bitcoin.Address(addrString), 50);
+  transaction.addOutput(new Bitcoin.Address(addrString), 50*1e8);
+  transaction.addOutput(new Bitcoin.Address(addrString), 500*1e8);
+  transaction.addOutput(new Bitcoin.Address(addrString), 5000*1e8);
+  transaction.addOutput(new Bitcoin.Address(addrString), 500000*1e8);
   var bytes = transaction.serialize();
   ok(bytes, "serialize");
   var tx2 = Bitcoin.Transaction.deserialize(bytes);
   ok(tx2, "deserialize");
   deepEqual(transaction.getHash(), tx2.getHash(), "deserialized matches tx");
+  equal(transaction.outs[0].value, 50, '50 satoshi output');
+  equal(transaction.outs[1].value, 50*1e8, '50 btc output');
+  equal(transaction.outs[2].value, 500*1e8, '500 btc output');
+  equal(transaction.outs[3].value, 5000*1e8, '5000 btc output');
+  equal(transaction.outs[4].value, 500000*1e8, '500000 btc output');
 });
 
 test("Add Input", function() {

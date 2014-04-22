@@ -134,6 +134,25 @@ Bitcoin.Util = {
   },
 
   /**
+   * Turn an integer into a little-endian array of |length| bytes
+   */
+  numToBytes: function(num, length) {
+    if (length === undefined) length = 8;
+    if (length === 0) return [];
+    return [num % 256].concat(this.numToBytes(Math.floor(num / 256), length - 1));
+  },
+
+  bytesToNum: function(bytes) {
+    var num = 0;
+    var factor = 1;
+    for (var i = 0; i < bytes.length; ++i) {
+      num += bytes[i] * factor;
+      factor *= 256;
+    }
+    return num;
+  },
+
+  /**
    * Turn an integer into a "var_int".
    *
    * "var_int" is a variable length integer used by Bitcoin's binary format.
