@@ -5,7 +5,7 @@
     if (!data) {
       this.buffer = [];
     } else if ("string" == typeof data) {
-      this.buffer = Crypto.util.base64ToBytes(data);
+      this.buffer = Crypto.util.hexToBytes(data);
     } else if (Bitcoin.Util.isArray(data)) {
       this.buffer = data;
     } else if (data instanceof Script) {
@@ -85,7 +85,7 @@
    * Pubkey:
    *   Paying to a public key directly.
    *   [pubKey] OP_CHECKSIG
-   * 
+   *
    * Strange:
    *   Any other script (no template matched).
    */
@@ -123,7 +123,7 @@
    *
    * In the future, for payToScriptHash outputs, this will return the
    * scriptHash. Note that non-standard and standard payToScriptHash transactions
-   * look the same 
+   * look the same
    *
    * This method is useful for indexing transactions.
    */
@@ -166,21 +166,28 @@
    * Pubkey:
    *   Paying to a public key directly.
    *   [sig]
-   * 
+   *
    * Strange:
    *   Any other script (no template matched).
    */
   Script.prototype.getInType = function ()
   {
-    if (this.chunks.length == 1 &&
-        Bitcoin.Util.isArray(this.chunks[0])) {
+    var chunks = this.chunks;
+    if (chunks.length == 1 &&
+        Bitcoin.Util.isArray(chunks[0])) {
       // Direct IP to IP transactions only have the signature in their scriptSig.
       // TODO: We could also check that the length of the data is correct.
       return 'Pubkey';
-    } else if (this.chunks.length == 2 &&
-               Bitcoin.Util.isArray(this.chunks[0]) &&
-               Bitcoin.Util.isArray(this.chunks[1])) {
+    } else if (chunks.length == 2 &&
+               Bitcoin.Util.isArray(chunks[0]) &&
+               Bitcoin.Util.isArray(chunks[1])) {
       return 'Address';
+    } else if (chunks[0] == ops.OP_0 &&
+        chunks.slice(1).reduce(function(t, chunk, i) {
+            // Partially signed transactions may have a place holder OP_0.
+            return t && (chunk == ops.OP_0 || (Array.isArray(chunk) && (chunk[0] == 48 || i == chunks.length - 2)));
+        }, true)) {
+        return 'Multisig';
     } else {
       return 'Strange';
     }
@@ -279,6 +286,10 @@
    */
   Script.createOutputScript = function (address)
   {
+    if (!(address instanceof Bitcoin.Address)) {
+      throw 'invalid argument';
+    }
+
     var script = new Bitcoin.Script();
     if (address.version == Bitcoin.Address.pubKeyHashVersion) {
       script.writeOp(ops.OP_DUP);
@@ -295,12 +306,12 @@
     }
     return script;
   };
-  
+
   /**
    * Extract bitcoin addresses from an output script
    */
   Script.prototype.extractAddresses = function (addresses)
-  { 
+  {
     switch (this.getOutType()) {
     case 'Address':
       addresses.push(new Bitcoin.Address(this.chunks[2]));
@@ -327,7 +338,7 @@
    * Extract bitcoin addresses from a multi-sigscript
    */
   Script.prototype.extractMultiSigPubKeys = function (keys)
-  { 
+  {
     if (this.chunks.length == 0 ||
         this.chunks[this.chunks.length - 1] != ops.OP_CHECKMULTISIG ||
         this.chunks[this.chunks.length - 2] > ops.OP_1 + 2) {
@@ -353,7 +364,7 @@
     for (var i = 0; i < pubkeys.length; ++i) {
       script.writeBytes(pubkeys[i]);
     }
-    
+
     script.writeOp(ops.OP_1 + pubkeys.length - 1);
 
     script.writeOp(ops.OP_CHECKMULTISIG);

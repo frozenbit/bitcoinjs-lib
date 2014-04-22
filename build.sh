@@ -35,7 +35,6 @@ export FILES="\
     $SRCDIR/src/opcode.js \
     $SRCDIR/src/script.js \
     $SRCDIR/src/transaction.js \
-    $SRCDIR/src/txdb.js \
     $SRCDIR/src/bip32.js \
     $SRCDIR/src/bitcoin.js"
 

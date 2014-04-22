@@ -165,10 +165,10 @@ Bitcoin.Util = {
     if (i < 0xfd) {
       // unsigned char
       return [i];
-    } else if (i <= 1<<16) {
+    } else if (i < 0x10000) {
       // unsigned short (LE)
       return [0xfd, i & 255, i >>> 8];    // little endian!
-    } else if (i <= 1<<32) {
+    } else if (i < 0x100000000) {
       // unsigned int (LE)
       return [0xfe].concat(Crypto.util.wordsToBytes([i]).reverse());  // little endian!
     } else {
@@ -176,6 +176,28 @@ Bitcoin.Util = {
       // unsigned long long (LE)
       //return [0xff].concat(Crypto.util.wordsToBytes([i >>> 32, i]).reverse());
     }
+  },
+
+  hexToBytes: function(hex) {
+    for (var bytes = [], c = 0; c < hex.length; c += 2) {
+      var byte = parseInt(hex.substr(c, 2), 16);
+      if (isNaN(byte)) {
+        throw 'illegal input';
+      }
+      bytes.push(byte);
+    }
+    return bytes;
+  },
+
+  bytesToHex: function (bytes) {
+    for (var hex = [], i = 0; i < bytes.length; i++) {
+      if (bytes[i] > 0xff) {
+        throw 'illegal input';
+      }
+      hex.push((bytes[i] >>> 4).toString(16));
+      hex.push((bytes[i] & 0xF).toString(16));
+    }
+    return hex.join("");
   },
 
   /**
@@ -251,9 +273,3 @@ Bitcoin.Util = {
     return Crypto.SHA256(Crypto.SHA256(data, { asBytes: true }), { asBytes: true });
   }
 };
-
-for (var i in Crypto.util) {
-  if (Crypto.util.hasOwnProperty(i)) {
-    Bitcoin.Util[i] = Crypto.util[i];
-  }
-}
