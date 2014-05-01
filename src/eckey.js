@@ -155,7 +155,24 @@ Bitcoin.ECKey = (function () {
       eckey = new ECKey(privKey);
     }
     var privKey = eckey.priv;
+
+    // TODO:  Fix this stateful compressed/uncompressed nonsense, as it is totally broken.
+    // The API is stateful where you set this flag, and that determines how a pubkey is
+    // returned from getPub?  Really?  Who thought up that meathead API.
+    // Now we have a library where some methods require uncompressed, others compressed.  This one,
+    // requires uncompressed - err - it really doesn't matter, BUT USE ONE OR THE OTHER!!! The only
+    // thing that doesn't work is both.   So always use UNCOMPRESSED.
+    // BIP32 only hands back COMPRESSED.  This entire library needs to be redone without stateful
+    // pubkey types.  There is NO REASON for these bugs.
+
+    var wasCompressed = eckey.compressed;
+    if (wasCompressed) {
+      eckey.setCompressed(false);
+    }
     var pubKey = eckey.getPub();
+    if (wasCompressed) {
+      eckey.setCompressed(true);
+    }
 
     var chainXor = Crypto.SHA256(Crypto.SHA256(pubKey, {asBytes: true}), {asBytes: true});
     for (var i = 0; i < 32; i++)
