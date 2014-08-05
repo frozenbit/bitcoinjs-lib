@@ -383,6 +383,22 @@
     return script;
   };
 
+  /**
+   * Return a human-readable version of the script
+   */
+  Script.prototype.toString = function() {
+    var pieces = [];
+    for (var i = 0; i < this.chunks.length; i++) {
+      var chunk = this.chunks[i];
+      if (chunk in Bitcoin.Opcode.reverseMap) {
+        pieces.push(Bitcoin.Opcode.reverseMap[chunk]);
+      } else {
+        pieces.push(Bitcoin.Util.bytesToHex(chunk));
+      }
+    }
+    return pieces.join(' ');
+  };
+
   Script.prototype.clone = function ()
   {
     return new Script(this.buffer);

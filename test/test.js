@@ -247,7 +247,7 @@ test("Build Scripts", function() {
 });
 
 test("Pay To PubKey Hash Output Script", function() {
-  expect(5);
+  expect(6);
   var key = new Bitcoin.ECKey();
   var address = new Bitcoin.Address(key);
   var script = Bitcoin.Script.createOutputScript(address);
@@ -255,6 +255,7 @@ test("Pay To PubKey Hash Output Script", function() {
   equal(script.chunks.length, 5);
 
   equal('Address', script.getOutType(), "Output Script Type");
+  equal(script.toString(), 'OP_DUP OP_HASH160 ' + Bitcoin.Util.bytesToHex(key.getPubKeyHash()) + ' OP_EQUALVERIFY OP_CHECKSIG');
 
   var addresses = [];
   script.extractAddresses(addresses);
@@ -263,7 +264,7 @@ test("Pay To PubKey Hash Output Script", function() {
 });
 
 test("Pay To Script Hash Output Script", function() {
-  expect(5);
+  expect(6);
   var keys = [];
   for (var index = 0; index < 3; ++index) {
     keys.push(new Bitcoin.ECKey().getPub());
@@ -274,6 +275,7 @@ test("Pay To Script Hash Output Script", function() {
   equal(script.chunks.length, 3);
 
   equal('P2SH', script.getOutType(), "Output Script Type");
+  equal(script.toString(), 'OP_HASH160 ' + Bitcoin.Util.bytesToHex(script.simpleOutHash()) + ' OP_EQUAL');
 
   var addresses = [];
   script.extractAddresses(addresses);
@@ -282,9 +284,11 @@ test("Pay To Script Hash Output Script", function() {
 });
 
 test("Decode MultiSig Input Script", function() {
-  var keys = [];
+  var key, keys = [], hexKeys = [];
   for (var index = 0; index < 3; ++index) {
-    keys.push(new Bitcoin.ECKey().getPub());
+    key = new Bitcoin.ECKey().getPub();
+    keys.push(key);
+    hexKeys.push(Bitcoin.Util.bytesToHex(key));
   }
   var multiSigAddress = Bitcoin.Address.createMultiSigAddress(keys, 2);
   ok(multiSigAddress, 'created address');
@@ -297,6 +301,8 @@ test("Decode MultiSig Input Script", function() {
   ok(bytes, 'converted back to bytes');
   var script = new Bitcoin.Script(bytes);
   ok(script, 'created script');
+
+  equal(script.toString(), 'OP_2 ' + hexKeys.join(' ') + ' OP_3 OP_CHECKMULTISIG');
 
   var addresses = [];
   var count = script.extractMultiSigPubKeys(addresses);
