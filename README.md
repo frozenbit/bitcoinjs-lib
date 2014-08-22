@@ -10,7 +10,7 @@ most notably ECDSA signing and verification.
 * sh build.sh
 
 
-# BitGo improvements
+# FrozenBit improvements
 
 BitGo made quite a few improvements, including:
 
@@ -24,6 +24,11 @@ BitGo made quite a few improvements, including:
 * A build script
 * Can be used both client side and server side (node.js)
 * More tests
+
+ We're building off of their progress ~ Here's what we've done.
+* Added more commentation
+* Fixing and minification of Bip 38
+* Fixed Java Module
 
 # Status
 
