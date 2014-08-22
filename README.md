@@ -10,7 +10,7 @@ most notably ECDSA signing and verification.
 * sh build.sh
 
 
-# FrozenBit improvements
+# Bitgo/FrozenBit improvements
 
 BitGo made quite a few improvements, including:
 
